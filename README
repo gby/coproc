@@ -1,0 +1,4 @@
+
+This is the source of CoProc, a proof of concept library wrapper that
+aims to provide a rich and easy to use API for using proccesses instead 
+of threads.

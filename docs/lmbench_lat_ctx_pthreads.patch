@@ -1,0 +1,240 @@
+diff -X /home/gby/Workspace/build/build-target/linux-2.6.19/Documentation/dontdiff -Naur lmbench-3.0-a9/results/percent.errs lmbench-3.0-a9-pthread/results/percent.errs
+--- lmbench-3.0-a9/results/percent.errs	1970-01-01 02:00:00.000000000 +0200
++++ lmbench-3.0-a9-pthread/results/percent.errs	2008-12-18 15:29:51.000000000 +0200
+@@ -0,0 +1,3 @@
++Name "main::files" used only once: possible typo at ../scripts/getpercent line 14.
++Name "main::lat_tlb" used only once: possible typo at ../scripts/getpercent line 157.
++Name "main::bw_file" used only once: possible typo at ../scripts/getpercent line 91.
+diff -X /home/gby/Workspace/build/build-target/linux-2.6.19/Documentation/dontdiff -Naur lmbench-3.0-a9/src/bench.h lmbench-3.0-a9-pthread/src/bench.h
+--- lmbench-3.0-a9/src/bench.h	2006-06-27 19:27:19.000000000 +0300
++++ lmbench-3.0-a9-pthread/src/bench.h	2008-12-17 16:42:21.000000000 +0200
+@@ -9,6 +9,7 @@
+ typedef unsigned char bool_t;
+ #endif
+ 
++#include 	<pthread.h>
+ #include	<assert.h>
+ #include        <ctype.h>
+ #include        <stdio.h>
+diff -X /home/gby/Workspace/build/build-target/linux-2.6.19/Documentation/dontdiff -Naur lmbench-3.0-a9/src/lat_ctx.c lmbench-3.0-a9-pthread/src/lat_ctx.c
+--- lmbench-3.0-a9/src/lat_ctx.c	2007-11-11 11:46:31.000000000 +0200
++++ lmbench-3.0-a9-pthread/src/lat_ctx.c	2008-12-17 17:36:35.000000000 +0200
+@@ -21,9 +21,26 @@
+ #define	max(a, b)	((a) > (b) ? (a) : (b))
+ #endif
+ 
+-void	doit(int rd, int wr, int process_size);
++#define TYPE_PROC 	(0)
++#define TYPE_THREAD 	(1)
++
++union   _ids {
++         void *        ids;
++         pid_t *       pids;
++         pthread_t *   tids;
++}; 
++
++struct _thread_arg {
++	int	i;
++	int	**p;
++	int	procs;
++	int	process_size;
++};
++
++
++void	doit(int rd, int wr, int process_size, int type);
+ int	create_pipes(int **p, int procs);
+-int	create_daemons(int **p, pid_t *pids, int procs, int process_size);
++int	create_daemons(int **p, union _ids, int procs, int process_size, int type);
+ void	initialize_overhead(iter_t iterations, void* cookie);
+ void	cleanup_overhead(iter_t iterations, void* cookie);
+ void	benchmark_overhead(iter_t iterations, void* cookie);
+@@ -35,9 +52,10 @@
+ 	int	process_size;
+ 	double	overhead;
+ 	int	procs;
+-	pid_t*	pids;
++	union _ids ids;
+ 	int	**p;
+ 	void*	data;
++	int	type;
+ };
+ 
+ int
+@@ -49,7 +67,7 @@
+ 	int	warmup = 0;
+ 	int	repetitions = -1;
+ 	struct _state state;
+-	char *usage = "[-P <parallelism>] [-W <warmup>] [-N <repetitions>] [-s kbytes] processes [processes ...]\n";
++	char *usage = "[-P <parallelism>] [-W <warmup>] [-N <repetitions>] [-s kbytes] [-t <0: procs|1:pthreads>] processes [processes ...]\n";
+ 	double	time;
+ 
+ 	/*
+@@ -62,13 +80,17 @@
+ 
+ 	state.process_size = 0;
+ 	state.overhead = 0.0;
+-	state.pids = NULL;
++	state.ids.ids = NULL;
+ 
+ 	/*
+ 	 * If they specified a context size, or parallelism level, get them.
+ 	 */
+-	while (( c = getopt(ac, av, "s:P:W:N:")) != EOF) {
++	while (( c = getopt(ac, av, "s:P:W:N:t:")) != EOF) {
+ 		switch(c) {
++		case 't':
++			state.type = atoi(optarg);
++			if (state.type != TYPE_THREAD && state.type != TYPE_PROC) lmbench_usage(ac, av, usage);
++			break;
+ 		case 'P':
+ 			parallel = atoi(optarg);
+ 			if (parallel <= 0) lmbench_usage(ac, av, usage);
+@@ -135,7 +157,7 @@
+ 
+ 	if (iterations) return;
+ 
+-	pState->pids = NULL;
++	pState->ids.ids = NULL;
+ 	pState->p = (int**)malloc(pState->procs * (sizeof(int*) + 2 * sizeof(int)));
+ 	pState->data = (pState->process_size > 0) ? malloc(pState->process_size) : NULL;
+ 	if (!pState->p || (pState->process_size > 0 && !pState->data)) {
+@@ -208,12 +230,12 @@
+ 
+ 	initialize_overhead(iterations, cookie);
+ 
+-	pState->pids = (pid_t*)malloc(pState->procs * sizeof(pid_t));
+-	if (pState->pids == NULL)
++	pState->ids.ids = (pid_t*)malloc(pState->procs * sizeof(pState->ids));
++	if (pState->ids.ids == NULL)
+ 		exit(1);
+-	bzero((void*)pState->pids, pState->procs * sizeof(pid_t));
+-	procs = create_daemons(pState->p, pState->pids, 
+-			       pState->procs, pState->process_size);
++	bzero((void*)pState->ids.ids, pState->procs * sizeof(pState->ids));
++	procs = create_daemons(pState->p, pState->ids, 
++			       pState->procs, pState->process_size, pState->type);
+ 	if (procs < pState->procs) {
+ 		cleanup(0, cookie);
+ 		exit(1);
+@@ -232,15 +254,22 @@
+ 	 * Close the pipes and kill the children.
+ 	 */
+ 	cleanup_overhead(iterations, cookie);
+-     	for (i = 1; pState->pids && i < pState->procs; ++i) {
+-		if (pState->pids[i] > 0) {
+-			kill(pState->pids[i], SIGKILL);
+-			waitpid(pState->pids[i], NULL, 0);
++     	for (i = 1; pState->ids.pids && i < pState->procs; ++i) {
++		if (pState->ids.pids[i] > 0) {
++			if(pState->type == TYPE_PROC) {
++				kill(pState->ids.pids[i], SIGKILL);
++				waitpid(pState->ids.pids[i], NULL, 0);
++			} else { /* TYPE_THREAD */
++				void * dummy;
++
++				pthread_cancel(pState->ids.tids[i]);
++				pthread_join(pState->ids.tids[i], &dummy);
++			}
+ 		}
+ 	}
+-	if (pState->pids)
+-		free(pState->pids);
+-	pState->pids = NULL;
++	if (pState->ids.ids)
++		free(pState->ids.ids);
++	pState->ids.ids = NULL;
+ }
+ 
+ void
+@@ -269,7 +298,7 @@
+ 
+ 
+ void
+-doit(int rd, int wr, int process_size)
++doit(int rd, int wr, int process_size, int type)
+ {
+ 	int	msg;
+ 	void*	data = NULL;
+@@ -294,12 +323,31 @@
+ 			break;
+ 		}
+ 	}
+-	exit(1);
++
++	if(type == TYPE_PROC) {
++		exit(1);
++	} 
+ }
+ 
+ 
++void * thread_doit(void * parg) {
++
++	struct _thread_arg * arg = (struct _thread_arg *)parg;
++
++	if(arg) {
++
++		handle_scheduler(benchmp_childid(), arg->i, arg->procs-1);
++		doit(arg->p[arg->i-1][0], arg->p[arg->i][1], arg->process_size, TYPE_THREAD);
++
++		free(arg);
++	}
++
++	return NULL;
++
++}
++
+ int
+-create_daemons(int **p, pid_t *pids, int procs, int process_size)
++create_daemons(int **p, union _ids ids, int procs, int process_size, int type)
+ {
+ 	int	i, j;
+ 	int	msg;
+@@ -312,7 +360,8 @@
+ 	 */
+ 	handle_scheduler(benchmp_childid(), 0, procs-1);
+      	for (i = 1; i < procs; ++i) {
+-		switch (pids[i] = fork()) {
++		if(type == TYPE_PROC) {
++		switch (ids.pids[i] = fork()) {
+ 		    case -1:	/* could not fork, out of processes? */
+ 			return i;
+ 
+@@ -322,12 +371,25 @@
+ 				if (j != i - 1) close(p[j][0]);
+ 				if (j != i) close(p[j][1]);
+ 			}
+-			doit(p[i-1][0], p[i][1], process_size);
++			doit(p[i-1][0], p[i][1], process_size, TYPE_PROC);
+ 			/* NOTREACHED */
+ 
+ 		    default:	/* parent */
+ 			;
+ 	    	}
++		} else { /* TYPE_THREAD */
++
++		  struct _thread_arg * arg = malloc(sizeof(struct _thread_arg));
++
++		  if(!arg) return i; /* ran out of memory */
++
++		   arg->i = i;
++		   arg->procs = procs;
++		   arg->process_size = process_size;
++		   arg->p = p;
++
++		   pthread_create(&ids.tids[i], NULL, thread_doit, arg);
++		}
+ 	}
+ 
+ 	/*
+diff -X /home/gby/Workspace/build/build-target/linux-2.6.19/Documentation/dontdiff -Naur lmbench-3.0-a9/src/Makefile lmbench-3.0-a9-pthread/src/Makefile
+--- lmbench-3.0-a9/src/Makefile	2007-04-10 15:16:49.000000000 +0300
++++ lmbench-3.0-a9-pthread/src/Makefile	2008-12-17 16:43:56.000000000 +0200
+@@ -58,7 +58,7 @@
+ 	lmbench/Results/irix/indigo2 lmbench/Results/linux/pentium \
+ 	lmbench/Results/osf1/alpha lmbench/Results/solaris/ss20* 
+ 
+-COMPILE=$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS)
++COMPILE=$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) -pthread
+ 
+ INCS =	bench.h lib_mem.h lib_tcp.h lib_udp.h stats.h timing.h
+ 

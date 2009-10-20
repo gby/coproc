@@ -163,6 +163,7 @@ pid_t coproc_create(char * coproc_name, struct coproc_attributes * attrib, \
 	} else {
 		/* Child */
 
+		prctl(PR_SET_NAME,coproc_name,0,0,0);
 		strncpy(program_invocation_name, coproc_name, global.title_len);
 		program_invocation_name[global.title_len + 1] = 0;
 

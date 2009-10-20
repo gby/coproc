@@ -35,6 +35,7 @@
 #include <sys/syscall.h>
 #include <sys/types.h>
 #include <signal.h>
+#include <sys/prctl.h>
 
 struct coproc_attributes {
 
